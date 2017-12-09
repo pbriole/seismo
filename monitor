@@ -1,0 +1,56 @@
+#!/bin/bash
+#Monitors GCMT for Greece
+#P Briole 8 December 2017 - v1.0
+
+if [ "$1" == "-h" ]; then echo "Monitors GCMT for Greece"; echo "Usage : $0 [date1[date2]]"
+echo "Format of date = yyyy/mm/dd"; echo "Current day if no argument"; exit; fi
+
+ami=35; ama=42; omi=21; oma=27                                                                                                               # Selection box (lat-long) for Greece
+
+if [ -n "$1" ]; then d1=$1; else d1=`date +\%Y/\%m/\%d`; fi; d2=$d1; if [ -n "$2" ]; then d2=$2; fi
+dd1=`date -d $d1 +\%s`; dd2=`date -d $d2 +\%s`
+#rm qcmt.ndk* 2> /dev/null
+
+rm events 2> /dev/null; touch events; u=$dd1
+
+if [ ! -f "qcmt.ndk" ]; then wget -q http://www.ldeo.columbia.edu/~gcmt/projects/CMT/catalog/NEW_QUICK/qcmt.ndk; fi                          # Get the CMT file for the current year
+
+while [ "$u" -le "$dd2" ]; do g=`date --date=@$u +\%Y"/"\%m"/"\%d`; grep $g qcmt.ndk -n | cl -di ":" c1 >> events; u=$(($u+86400)); done     # Select events
+
+cat events | while read a; do b=$(($a+4)); sed -n ""$a","$b"p" qcmt.ndk > toto; `head -1 toto > ta`
+da=`cat ta | cl 2`; ti=`cat ta | cl 3`; la=`cat ta | cl 4`; lo=`cat ta | cl 5`; de=`cat ta | cl 6`; mag=`cat ta | cl 8`
+laa=${la::-5}; loa=${lo::-5}
+
+if [ $loa -ge $omi ] && [ $loa -le $oma ] && [ $laa -ge $ami ] && [ $laa -le $ama ]; then code=`sed -n 2p toto | cl 1`                       # Select events in the box
+ex=`sed -n 4p toto | cl 1`; ex=$(($ex-7)); mo=`sed -n 5p toto | cl 11`                                                                       # Moment
+s1=`sed -n 5p toto | cl 12`;d1=`sed -n 5p toto | cl 13`;r1=`sed -n 5p toto | cl 14`                                                          # Fault plane 1
+s2=`sed -n 5p toto | cl 15`;d2=`sed -n 5p toto | cl 16`;r2=`sed -n 5p toto | cl 17`                                                          # Fault plane 2
+echo "Event : "$code $da $ti; echo "Coordinates : "$la $lo $de $mag; echo "Moment : "$mo $ex; echo "Planes : "$s1 $d1 $r1 $s2 $d2 $r2
+
+sd=`echo "($mo*10^($ex-10))/3" | bc -l`; ll=`echo "e(l($sd*15000)/3)" | bc -l`; wi=`echo "$ll/1.6" | bc -l`; sl=`echo "$sd/$ll/$wi" | bc -l` # Fault size
+de1=`echo "$de*1000-$wi*s($d1/57.296)" | bc -l`; de2=`echo "$de*1000-$wi*s($d2/57.296)" | bc -l`
+sl1n=`echo "-$sl*s($r1/57.296)*1000" | bc -l`; sl1d=`echo "-$sl*c($r1/57.296)*1000" | bc -l`                                                 # Slip (plane 1) 
+sl2n=`echo "-$sl*s($r2/57.296)*1000" | bc -l`; sl2d=`echo "-$sl*c($r2/57.296)*1000" | bc -l`                                                 # Slip (plane 2)
+
+if [ $loa -le 23 ]; then fu=34; else fu=35; fi; echo 1$'\n'$fu$'\n'GEO$'\n'DUMMY$'\n'2$'\n'$lo $la $de$'\n'0 > tu                            # Prepare trcoor
+xhy=`trcoor < tu | sed -n 12p | cl 1`; yhy=`trcoor < tu | sed -n 12p | cl 2`; echo "UTM zone : "$fu; rm tu                                   # UTM Coordinates of the hypocentre 
+
+xlo1=`echo "$xhy+$wi*c($d1/57.296)*c($s1/57.296)" | bc -l`; ylo1=`echo "$yhy-$wi*c($d1/57.296)*s($s1/57.296)" | bc -l`                       # Centre of upper edge (plane 1)
+xlo2=`echo "$xhy+$wi*c($d2/57.296)*c($s2/57.296)" | bc -l`; ylo2=`echo "$yhy-$wi*c($d2/57.296)*s($s2/57.296)" | bc -l`                       # Centre of upper edge (plane 2)
+
+zx=`echo "scale=2;$xlo1/1000" | bc -l`; zy=`echo "scale=2;$ylo1/1000" | bc -l`; zz=`echo "scale=1;$de1/1000" | bc -l`
+zl=`echo "scale=1;$ll/2000" | bc -l`; zw=`echo "scale=1;$wi/1000" | bc -l`
+sln=`echo "scale=0;$sl1n/1" | bc -l`; sld=`echo "scale=0;$sl1d/1" | bc -l`
+
+echo""; echo "Focal plane 1"
+echo $zx "1." $zy "1."; echo $zz "1."; echo $s1 "0."; echo $zl "1." $zw "1."; echo $d1 "0."; echo $sld"." "10." $sln"." "10." "0." "0."      # Parameters of plane 1
+
+zx=`echo "scale=2;$xlo2/1000" | bc -l`; zy=`echo "scale=2;$ylo2/1000" | bc -l`; zz=`echo "scale=1;$de2/1000" | bc -l`
+sln=`echo "scale=0;$sl2n/1" | bc -l`; sld=`echo "scale=0;$sl2d/1" | bc -l`
+
+echo""; echo "Focal plane 2"
+echo $zx "1." $zy "1."; echo $zz "1."; echo $s2 "0."; echo $zl "1." $zw "1."; echo $d2 "0."; echo $sld"." "10." $sln"." "10." "0." "0."      # Parameters of plane 2
+
+fi 
+done
+rm events ta toto 2> /dev/null
